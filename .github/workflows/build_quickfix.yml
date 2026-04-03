@@ -1,0 +1,59 @@
+name: Build QuickFIX Wheels
+
+on:
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout QuickFIX
+        uses: actions/checkout@v4
+        with:
+          repository: quickfix/quickfix
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install SWIG
+        run: choco install swig -y
+
+      - name: Install build tools
+        run: pip install --upgrade pip setuptools wheel build
+
+      - name: Build wheel
+        run: python -m build --wheel --outdir ./dist/
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickfix-windows-wheel
+          path: dist/*.whl
+
+  build-linux:
+    runs-on: ubuntu-latest
+    container: amazonlinux:2023
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gcc gcc-c++ python3.13 python3.13-devel \
+          python3.13-pip swig cmake make git
+
+      - name: Checkout QuickFIX
+        uses: actions/checkout@v4
+        with:
+          repository: quickfix/quickfix
+
+      - name: Install build tools
+        run: python3.13 -m pip install --upgrade pip setuptools wheel build
+
+      - name: Build wheel
+        run: python3.13 -m build --wheel --outdir ./dist/
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickfix-linux-wheel
+          path: dist/*.whl
