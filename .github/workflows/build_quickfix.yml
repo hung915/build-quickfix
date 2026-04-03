@@ -1,16 +1,14 @@
 name: Build QuickFIX Wheels
 
 on:
-  workflow_dispatch:  # manual trigger
+  workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout QuickFIX
-        uses: actions/checkout@v4
-        with:
-          repository: quickfix/quickfix
+      - name: Clone QuickFIX source
+        run: git clone https://github.com/quickfix/quickfix.git .
 
       - name: Setup Python 3.13
         uses: actions/setup-python@v5
@@ -29,22 +27,22 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: quickfix-windows-wheel
+          name: quickfix-windows-cp313
           path: dist/*.whl
 
   build-linux:
     runs-on: ubuntu-latest
-    container: amazonlinux:2023
     steps:
       - name: Install dependencies
         run: |
-          dnf install -y gcc gcc-c++ python3.13 python3.13-devel \
-          python3.13-pip swig cmake make git
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ \
+            python3.13 python3.13-dev \
+            swig cmake make git
 
-      - name: Checkout QuickFIX
-        uses: actions/checkout@v4
-        with:
-          repository: quickfix/quickfix
+      - name: Clone QuickFIX source
+        run: git clone https://github.com/quickfix/quickfix.git .
 
       - name: Install build tools
         run: python3.13 -m pip install --upgrade pip setuptools wheel build
@@ -55,5 +53,5 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: quickfix-linux-wheel
+          name: quickfix-linux-cp313
           path: dist/*.whl
