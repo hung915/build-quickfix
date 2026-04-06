@@ -4,69 +4,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-linux:
+  build-al2023:
     runs-on: ubuntu-latest
+    container:
+      image: amazonlinux:2023
+
     steps:
-      - name: Clone quickfix-package
-        run: git clone https://github.com/quickfix/quickfix-package.git .
-
-      - name: Setup Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install system dependencies
+      - name: Install build dependencies
         run: |
-          sudo add-apt-repository ppa:deadsnakes/ppa -y
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc g++ make cmake swig \
-            python3.13-dev
+          dnf install -y \
+            gcc gcc-c++ make cmake swig git \
+            python3.13 python3.13-devel python3.13-pip \
+            tar gzip findutils
 
-      - name: Run package-python.sh
-        run: |
-          chmod +x package-python.sh
-          ./package-python.sh
-
-      - name: Install build tools
+      - name: Install Python build tools
         run: python3.13 -m pip install --upgrade pip setuptools wheel build
 
+      - name: Clone quickfix-package
+        run: git clone https://github.com/quickfix/quickfix-package.git /build
+
+      - name: Run package script
+        working-directory: /build
+        run: chmod +x package-python.sh && ./package-python.sh
+
       - name: Build wheel
-        working-directory: quickfix-python
-        run: python3.13 -m build --wheel --outdir ./dist/
+        working-directory: /build/quickfix-python
+        run: python3.13 -m build --wheel --outdir /output/
+
+      - name: Copy wheel to workspace
+        run: cp /output/*.whl $GITHUB_WORKSPACE/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: quickfix-linux-cp313
-          path: quickfix-python/dist/*.whl
-
-  # build-windows:
-  #   runs-on: windows-latest
-  #   steps:
-  #     - name: Clone quickfix-package
-  #       run: git clone https://github.com/quickfix/quickfix-package.git .
-
-  #     - name: Setup Python 3.13
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.13"
-
-  #     - name: Install SWIG
-  #       run: choco install swig -y
-
-  #     - name: Run package.bat
-  #       run: package.bat
-
-  #     - name: Install build tools
-  #       run: python -m pip install --upgrade pip setuptools wheel build
-
-  #     - name: Build wheel
-  #       working-directory: quickfix-python
-  #       run: python -m build --wheel --outdir ./dist/
-
-  #     - name: Upload artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: quickfix-windows-cp313
-  #         path: quickfix-python/dist/*.whl
+          name: quickfix-al2023-cp313
+          path: "*.whl"
