@@ -20,16 +20,9 @@ jobs:
       - name: Install Python build tools
         run: python3.13 -m pip install --upgrade pip setuptools wheel build
 
-      - name: Clone quickfix-package
-        run: git clone https://github.com/quickfix/quickfix-package.git /build
-
-      - name: Run package script
-        working-directory: /build
-        run: chmod +x package-python.sh && ./package-python.sh
-
       - name: Build wheel
         working-directory: /build/quickfix-python
-        run: python3.13 -m build --wheel --outdir /output/
+        run: python3.13 -m pip wheel quickfix --wheel-dir /output/
 
       - name: Copy wheel to workspace
         run: cp /output/*.whl $GITHUB_WORKSPACE/
