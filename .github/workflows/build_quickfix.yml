@@ -21,8 +21,7 @@ jobs:
         run: python3.13 -m pip install --upgrade pip setuptools wheel build
 
       - name: Build wheel
-        working-directory: /build/quickfix-python
-        run: python3.13 -m pip wheel quickfix --wheel-dir /output/
+        run: pip3 wheel quickfix --wheel-dir /output/
 
       - name: Copy wheel to workspace
         run: cp /output/*.whl $GITHUB_WORKSPACE/
