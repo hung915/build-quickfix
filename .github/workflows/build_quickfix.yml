@@ -49,7 +49,11 @@ jobs:
         run: python3.13 -m pip install --upgrade pip setuptools wheel build
 
       - name: Clone quickfix-package
-        run: git clone https://github.com/hung915/quickfix-package.git /build
+        run: git clone https://github.com/quickfix/quickfix-package.git /build
+
+      - name: Clone quickfix into quickfix-package
+        working-directory: /build
+        run: git clone https://github.com/quickfix/quickfix ./quickfix
 
       - name: Run package script
         working-directory: /build
