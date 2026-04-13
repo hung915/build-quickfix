@@ -11,29 +11,42 @@ jobs:
       image: quay.io/pypa/manylinux2014_x86_64
 
     env:
+      PATH: /opt/python/cp311-cp311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       WHEELHOUSE: /wheelhouse
 
     steps:
+      # 🔥 CRITICAL FIX
+      - name: Create python3 shim
+        run: |
+          ln -sf /opt/python/cp311-cp311/bin/python /usr/bin/python3
+          ln -sf /opt/python/cp311-cp311/bin/pip /usr/bin/pip3
+
+      - name: Verify Python
+        run: |
+          which python
+          which python3
+          python -V
+          python3 -V
+          pip -V
+          pip3 -V
+
       - name: Install system build dependencies
         run: |
           yum install -y \
             gcc gcc-c++ make cmake git \
-            python3.11 python3.11-devel python3.11-pip
             zip unzip binutils
 
       - name: Upgrade Python build tools
         run: |
-          python3.11 -m pip install --upgrade \
+          python -m pip install --upgrade \
             pip setuptools wheel build auditwheel
 
       - name: Build vnpy_ctp wheel
         run: |
           mkdir -p $WHEELHOUSE
-          pip3 wheel vnpy_ctp \
-            --no-deps \
-            -w $WHEELHOUSE
+          pip wheel vnpy_ctp --no-deps -w $WHEELHOUSE
 
-      - name: Strip debug symbols (major size reduction)
+      - name: Strip debug symbols (huge size reduction)
         run: |
           for whl in $WHEELHOUSE/*.whl; do
             mkdir tmp
@@ -45,7 +58,7 @@ jobs:
             rm -rf tmp
           done
 
-      - name: Repair wheel for manylinux2014 compliance
+      - name: Repair wheel for manylinux2014
         run: |
           auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
@@ -57,7 +70,7 @@ jobs:
         run: |
           cp $WHEELHOUSE/repaired/*.whl $GITHUB_WORKSPACE/
 
-      - name: Upload wheel artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: vnpy_ctp-manylinux2014-cp311-optimized
