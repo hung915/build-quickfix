@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ============================================================
+  # Job 1: Build wheel inside manylinux container
+  # ============================================================
   build:
     runs-on: ubuntu-latest
 
@@ -16,103 +19,78 @@ jobs:
       WHEELHOUSE: /wheelhouse
 
     steps:
-      # ------------------------------------------------------------
-      # 1️⃣ python3 / pip3 shim (CRITICAL)
-      # ------------------------------------------------------------
       - name: Create python3 & pip3 shims
         run: |
           ln -sf $PYTHON_ROOT/bin/python /usr/bin/python3
           ln -sf $PYTHON_ROOT/bin/pip /usr/bin/pip3
 
-      - name: Verify Python
-        run: |
-          python -V
-          python3 -V
-          pip -V
-
-      # ------------------------------------------------------------
-      # 2️⃣ System tools (already available, just ensure basics)
-      # ------------------------------------------------------------
-      - name: Install basic tools
-        run: |
-          yum install -y \
-            zip unzip binutils git cmake
-
-      # ------------------------------------------------------------
-      # 3️⃣ Enable GCC 10 (C++17 support, PREINSTALLED ✅)
-      # ------------------------------------------------------------
-      - name: Enable devtoolset-10 (C++17)
+      - name: Enable GCC 10 (C++17)
         run: |
           source /opt/rh/devtoolset-10/enable
           gcc --version
           g++ --version
 
-      # ------------------------------------------------------------
-      # 4️⃣ Python build tooling
-      # ------------------------------------------------------------
       - name: Upgrade Python build tools
         run: |
           source /opt/rh/devtoolset-10/enable
           python -m pip install --upgrade \
             pip setuptools wheel build auditwheel
 
-      # ------------------------------------------------------------
-      # 5️⃣ Build wheel
-      # ------------------------------------------------------------
       - name: Build vnpy_ctp wheel
         run: |
           source /opt/rh/devtoolset-10/enable
           mkdir -p $WHEELHOUSE
           pip wheel vnpy_ctp --no-deps -w $WHEELHOUSE
 
-      # ------------------------------------------------------------
-      # 6️⃣ Strip symbols (BIG size reduction)
-      # ------------------------------------------------------------
-      - name: Strip native libraries
+      - name: Strip native symbols (safe)
         run: |
           for whl in $WHEELHOUSE/*.whl; do
-              echo "Stripping $whl"
-              tmpdir=$(mktemp -d)
-              unzip -q "$whl" -d "$tmpdir"
-
-              find "$tmpdir" -name "*.so" -exec strip --strip-unneeded {} \; || true
-              find "$tmpdir" -name "*.a" -delete
-
-              new_whl="${whl%.whl}-stripped.whl"
-              (cd "$tmpdir" && zip -9 -qr "$new_whl" .)
-
-              rm -rf "$tmpdir"
-              rm "$whl"
-              mv "$new_whl" "$whl"
+            tmp=$(mktemp -d)
+            unzip -q "$whl" -d "$tmp"
+            find "$tmp" -name "*.so" -exec strip --strip-unneeded {} \; || true
+            find "$tmp" -name "*.a" -delete
+            new="${whl%.whl}-stripped.whl"
+            (cd "$tmp" && zip -9 -qr "$new" .)
+            rm -rf "$tmp"
+            mv "$new" "$whl"
           done
 
-
-      # ------------------------------------------------------------
-      # 7️⃣ manylinux compliance
-      # ------------------------------------------------------------
-      - name: Auditwheel repair
+      - name: Auditwheel repair (manylinux2014)
         run: |
           auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
-      # ------------------------------------------------------------
-      # 8️⃣ Output
-      # ------------------------------------------------------------
-      - name: Show final wheel
+      - name: Prepare dist directory
         run: |
-          ls -lh $WHEELHOUSE/repaired
+          mkdir -p dist
+          cp $WHEELHOUSE/repaired/*.whl dist/
 
-      - name: Copy wheel to workspace
-        run: |
-          mkdir -p /github/workspace/dist
-          cp $WHEELHOUSE/repaired/*.whl /github/workspace/dist
+      # ✅ Job-to-job transfer
+      - name: Upload wheel to workflow storage
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-dist
+          path: dist/*.whl
 
+  # ============================================================
+  # Job 2: Upload artifact on host runner (GLIBC OK)
+  # ============================================================
   upload:
     runs-on: ubuntu-latest
     needs: build
 
     steps:
-      - name: Upload wheel artifact
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-dist
+          path: dist
+
+      - name: Verify wheel
+        run: |
+          ls -lh dist
+
+      - name: Upload final artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vnpy_ctp-manylinux2014-cp311
+          name: vnpy_ctp-manylinux2014-cp311-optimized
           path: dist/*.whl
