@@ -94,10 +94,14 @@ jobs:
         run: |
           auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
-      - name: Copy wheel to workspace
+      # ✅ Write to the shared GitHub workspace volume
+      #  Inside manylinux containers the workspace is mounted at /github/workspace
+      - name: Copy wheel to shared workspace
         run: |
-          mkdir -p $GITHUB_WORKSPACE/dist
-          cp $WHEELHOUSE/repaired/*.whl $GITHUB_WORKSPACE/dist/
+          mkdir -p /github/workspace/dist
+          cp $WHEELHOUSE/repaired/*.whl /github/workspace/dist/
+          echo "--- Wheels written ---"
+          ls /github/workspace/dist/
 
 
   upload:
@@ -109,4 +113,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vnpy_ctp-manylinux2014-cp311
-          path: $GITHUB_WORKSPACE/dist/*.whl
+          path: ${{ github.workspace }}/dist/*.whl
