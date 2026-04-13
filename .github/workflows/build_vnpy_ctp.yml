@@ -71,18 +71,39 @@ jobs:
       - name: Strip native libraries
         run: |
           for whl in $WHEELHOUSE/*.whl; do
-            mkdir tmp
-            unzip -q "$whl" -d tmp
-            find tmp -name "*.so" -exec strip --strip-unneeded {} \; || true
-            find tmp -name "*.a" -delete
-            rm "$whl"
-            (cd tmp && zip -9 -qr "../$(basename "$whl")" .)
-            rm -rf tmp
+              echo "Stripping $whl"
+              tmpdir=$(mktemp -d)
+              unzip -q "$whl" -d "$tmpdir"
+
+              find "$tmpdir" -name "*.so" -exec strip --strip-unneeded {} \; || true
+              find "$tmpdir" -name "*.a" -delete
+
+              new_whl="${whl%.whl}-stripped.whl"
+              (cd "$tmpdir" && zip -9 -qr "$new_whl" .)
+
+              rm -rf "$tmpdir"
+              rm "$whl"
+              mv "$new_whl" "$whl"
           done
+
+
+      # ------------------------------------------------------------
+      # 7️⃣ manylinux compliance
+      # ------------------------------------------------------------
+      - name: Auditwheel repair
+        run: |
+          auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
+
+      # ------------------------------------------------------------
+      # 8️⃣ Output
+      # ------------------------------------------------------------
+      - name: Show final wheel
+        run: |
+          ls -lh $WHEELHOUSE/repaired
 
       - name: Copy wheel to workspace
         run: |
-          cp $WHEELHOUSE/*.whl $GITHUB_WORKSPACE/
+          cp $WHEELHOUSE/repaired/*.whl $GITHUB_WORKSPACE/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
