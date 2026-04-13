@@ -1,33 +1,71 @@
-name: Build VNPy CTP Wheels
+name: Build vnpy_ctp manylinux2014 wheel (cp311, optimized)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-vnpy_ctp-al2023:
+  build:
     runs-on: ubuntu-latest
+
     container:
-      image: amazonlinux:2023
+      image: quay.io/pypa/manylinux2014_x86_64
+
+    env:
+      PYTHON_BIN: /opt/python/cp311-cp311/bin/python
+      PIP_BIN: /opt/python/cp311-cp311/bin/pip
+      WHEELHOUSE: /wheelhouse
 
     steps:
-      - name: Install build dependencies
+      - name: Install system build dependencies
         run: |
-          dnf install -y \
-            gcc gcc-c++ make cmake swig git \
-            python3.11 python3.11-devel python3.11-pip \
-            tar gzip findutils
+          yum install -y \
+            gcc gcc-c++ make cmake git \
+            zip unzip binutils
 
-      - name: Install Python build tools
-        run: python3.11 -m pip install --upgrade pip setuptools wheel build
+      - name: Verify Python
+        run: |
+          $PYTHON_BIN -V
+          $PIP_BIN -V
 
-      - name: Build wheel
-        run: pip3 wheel vnpy_ctp --wheel-dir /output/
+      - name: Upgrade Python build tools
+        run: |
+          $PYTHON_BIN -m pip install --upgrade \
+            pip setuptools wheel build auditwheel
+
+      - name: Build vnpy_ctp wheel
+        run: |
+          mkdir -p $WHEELHOUSE
+          $PIP_BIN wheel vnpy_ctp \
+            --no-deps \
+            -w $WHEELHOUSE
+
+      # 🔥 BIGGEST SIZE REDUCTION STEP
+      - name: Strip debug symbols from native libraries
+        run: |
+          for whl in $WHEELHOUSE/*.whl; do
+            mkdir tmp
+            unzip -q "$whl" -d tmp
+            find tmp -name "*.so" -exec strip --strip-unneeded {} \; || true
+            find tmp -name "*.a" -delete
+            rm "$whl"
+            (cd tmp && zip -9 -qr "../$(basename "$whl")" .)
+            rm -rf tmp
+          done
+
+      - name: Repair wheel for manylinux2014 compliance
+        run: |
+          auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
+
+      - name: List final wheel size
+        run: |
+          ls -lh $WHEELHOUSE/repaired
 
       - name: Copy wheel to workspace
-        run: cp /output/*.whl $GITHUB_WORKSPACE/
+        run: |
+          cp $WHEELHOUSE/repaired/*.whl $GITHUB_WORKSPACE/
 
-      - name: Upload artifact
+      - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vnpy_ctp-al2023-cp311
+          name: vnpy_ctp-manylinux2014-cp311-optimized
           path: "*.whl"
