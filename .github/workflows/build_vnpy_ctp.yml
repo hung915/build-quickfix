@@ -39,7 +39,7 @@ jobs:
       - name: Build vnpy_ctp wheel
         run: |
           mkdir -p $WHEELHOUSE
-          pip wheel vnpy_ctp --no-deps -w $WHEELHOUSE
+          pip wheel vnpy_ctp -w $WHEELHOUSE
 
       - name: Strip native libraries
         run: |
