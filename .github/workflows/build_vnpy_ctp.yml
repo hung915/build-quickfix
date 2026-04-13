@@ -17,7 +17,7 @@ jobs:
 
     steps:
       # ------------------------------------------------------------
-      # 1️⃣ Fix hidden python3 / pip3 calls (CRITICAL)
+      # 1️⃣ python3 / pip3 shim (CRITICAL)
       # ------------------------------------------------------------
       - name: Create python3 & pip3 shims
         run: |
@@ -26,42 +26,33 @@ jobs:
 
       - name: Verify Python
         run: |
-          which python
-          which python3
           python -V
           python3 -V
           pip -V
 
       # ------------------------------------------------------------
-      # 2️⃣ System dependencies
+      # 2️⃣ System tools (already available, just ensure basics)
       # ------------------------------------------------------------
-      - name: Install system build dependencies
+      - name: Install basic tools
         run: |
           yum install -y \
-            gcc gcc-c++ make cmake git \
-            zip unzip binutils \
-            centos-release-scl
+            zip unzip binutils git cmake
 
       # ------------------------------------------------------------
-      # 3️⃣ Enable GCC 11 (C++17 support)
+      # 3️⃣ Enable GCC 10 (C++17 support, PREINSTALLED ✅)
       # ------------------------------------------------------------
-      - name: Install and enable GCC 11
+      - name: Enable devtoolset-10 (C++17)
         run: |
-          yum install -y devtoolset-11-gcc devtoolset-11-gcc-c++
-          echo "source /opt/rh/devtoolset-11/enable" >> ~/.bashrc
-
-      - name: Verify compiler
-        run: |
-          source /opt/rh/devtoolset-11/enable
+          source /opt/rh/devtoolset-10/enable
           gcc --version
           g++ --version
 
       # ------------------------------------------------------------
-      # 4️⃣ Python build tools
+      # 4️⃣ Python build tooling
       # ------------------------------------------------------------
-      - name: Upgrade Python build tooling
+      - name: Upgrade Python build tools
         run: |
-          source /opt/rh/devtoolset-11/enable
+          source /opt/rh/devtoolset-10/enable
           python -m pip install --upgrade \
             pip setuptools wheel build auditwheel
 
@@ -70,14 +61,12 @@ jobs:
       # ------------------------------------------------------------
       - name: Build vnpy_ctp wheel
         run: |
-          source /opt/rh/devtoolset-11/enable
+          source /opt/rh/devtoolset-10/enable
           mkdir -p $WHEELHOUSE
-          pip wheel vnpy_ctp \
-            --no-deps \
-            -w $WHEELHOUSE
+          pip wheel vnpy_ctp --no-deps -w $WHEELHOUSE
 
       # ------------------------------------------------------------
-      # 6️⃣ Strip symbols & remove static libs (BIG size reduction)
+      # 6️⃣ Strip symbols (BIG size reduction)
       # ------------------------------------------------------------
       - name: Strip native libraries
         run: |
@@ -92,7 +81,7 @@ jobs:
           done
 
       # ------------------------------------------------------------
-      # 7️⃣ manylinux2014 compliance
+      # 7️⃣ manylinux compliance
       # ------------------------------------------------------------
       - name: Auditwheel repair
         run: |
