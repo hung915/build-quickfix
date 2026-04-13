@@ -103,7 +103,8 @@ jobs:
 
       - name: Copy wheel to workspace
         run: |
-          cp $WHEELHOUSE/repaired/*.whl $GITHUB_WORKSPACE/
+          mkdir -p /github/workspace/dist
+          cp $WHEELHOUSE/repaired/*.whl /github/workspace/dist
 
   upload:
     runs-on: ubuntu-latest
