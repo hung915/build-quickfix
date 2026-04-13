@@ -11,36 +11,36 @@ jobs:
       image: quay.io/pypa/manylinux2014_x86_64
 
     env:
-      PYTHON_BIN: /opt/python/cp311-cp311/bin/python
-      PIP_BIN: /opt/python/cp311-cp311/bin/pip
+      PYTHON_ROOT: /opt/python/cp311-cp311
+      PATH: /opt/python/cp311-cp311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       WHEELHOUSE: /wheelhouse
 
     steps:
+      - name: Verify Python
+        run: |
+          which python
+          python -V
+          pip -V
+
       - name: Install system build dependencies
         run: |
           yum install -y \
             gcc gcc-c++ make cmake git \
             zip unzip binutils
 
-      - name: Verify Python
-        run: |
-          $PYTHON_BIN -V
-          $PIP_BIN -V
-
       - name: Upgrade Python build tools
         run: |
-          $PYTHON_BIN -m pip install --upgrade \
+          python -m pip install --upgrade \
             pip setuptools wheel build auditwheel
 
       - name: Build vnpy_ctp wheel
         run: |
           mkdir -p $WHEELHOUSE
-          $PIP_BIN wheel vnpy_ctp \
+          pip wheel vnpy_ctp \
             --no-deps \
             -w $WHEELHOUSE
 
-      # 🔥 BIGGEST SIZE REDUCTION STEP
-      - name: Strip debug symbols from native libraries
+      - name: Strip debug symbols (major size reduction)
         run: |
           for whl in $WHEELHOUSE/*.whl; do
             mkdir tmp
@@ -56,7 +56,7 @@ jobs:
         run: |
           auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
-      - name: List final wheel size
+      - name: Show final wheel
         run: |
           ls -lh $WHEELHOUSE/repaired
 
