@@ -11,15 +11,18 @@ jobs:
       image: quay.io/pypa/manylinux2014_x86_64
 
     env:
+      PYTHON_ROOT: /opt/python/cp311-cp311
       PATH: /opt/python/cp311-cp311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       WHEELHOUSE: /wheelhouse
 
     steps:
-      # 🔥 CRITICAL FIX
-      - name: Create python3 shim
+      # ------------------------------------------------------------
+      # 1️⃣ Fix hidden python3 / pip3 calls (CRITICAL)
+      # ------------------------------------------------------------
+      - name: Create python3 & pip3 shims
         run: |
-          ln -sf /opt/python/cp311-cp311/bin/python /usr/bin/python3
-          ln -sf /opt/python/cp311-cp311/bin/pip /usr/bin/pip3
+          ln -sf $PYTHON_ROOT/bin/python /usr/bin/python3
+          ln -sf $PYTHON_ROOT/bin/pip /usr/bin/pip3
 
       - name: Verify Python
         run: |
@@ -28,25 +31,55 @@ jobs:
           python -V
           python3 -V
           pip -V
-          pip3 -V
 
+      # ------------------------------------------------------------
+      # 2️⃣ System dependencies
+      # ------------------------------------------------------------
       - name: Install system build dependencies
         run: |
           yum install -y \
             gcc gcc-c++ make cmake git \
-            zip unzip binutils
+            zip unzip binutils \
+            centos-release-scl
 
-      - name: Upgrade Python build tools
+      # ------------------------------------------------------------
+      # 3️⃣ Enable GCC 11 (C++17 support)
+      # ------------------------------------------------------------
+      - name: Install and enable GCC 11
         run: |
+          yum install -y devtoolset-11-gcc devtoolset-11-gcc-c++
+          echo "source /opt/rh/devtoolset-11/enable" >> ~/.bashrc
+
+      - name: Verify compiler
+        run: |
+          source /opt/rh/devtoolset-11/enable
+          gcc --version
+          g++ --version
+
+      # ------------------------------------------------------------
+      # 4️⃣ Python build tools
+      # ------------------------------------------------------------
+      - name: Upgrade Python build tooling
+        run: |
+          source /opt/rh/devtoolset-11/enable
           python -m pip install --upgrade \
             pip setuptools wheel build auditwheel
 
+      # ------------------------------------------------------------
+      # 5️⃣ Build wheel
+      # ------------------------------------------------------------
       - name: Build vnpy_ctp wheel
         run: |
+          source /opt/rh/devtoolset-11/enable
           mkdir -p $WHEELHOUSE
-          pip wheel vnpy_ctp --no-deps -w $WHEELHOUSE
+          pip wheel vnpy_ctp \
+            --no-deps \
+            -w $WHEELHOUSE
 
-      - name: Strip debug symbols (huge size reduction)
+      # ------------------------------------------------------------
+      # 6️⃣ Strip symbols & remove static libs (BIG size reduction)
+      # ------------------------------------------------------------
+      - name: Strip native libraries
         run: |
           for whl in $WHEELHOUSE/*.whl; do
             mkdir tmp
@@ -58,10 +91,16 @@ jobs:
             rm -rf tmp
           done
 
-      - name: Repair wheel for manylinux2014
+      # ------------------------------------------------------------
+      # 7️⃣ manylinux2014 compliance
+      # ------------------------------------------------------------
+      - name: Auditwheel repair
         run: |
           auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
+      # ------------------------------------------------------------
+      # 8️⃣ Output
+      # ------------------------------------------------------------
       - name: Show final wheel
         run: |
           ls -lh $WHEELHOUSE/repaired
