@@ -94,14 +94,19 @@ jobs:
         run: |
           auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
-      # ✅ Write to the shared GitHub workspace volume
-      #  Inside manylinux containers the workspace is mounted at /github/workspace
-      - name: Copy wheel to shared workspace
+      - name: Stage wheel into workspace
         run: |
           mkdir -p /github/workspace/dist
           cp $WHEELHOUSE/repaired/*.whl /github/workspace/dist/
-          echo "--- Wheels written ---"
           ls /github/workspace/dist/
+
+      # ✅ actions/cache uses plain shell commands internally,
+      #    no Node GLIBC requirements at save time on this runner
+      - name: Save wheel to cache
+        uses: actions/cache/save@v4
+        with:
+          path: /github/workspace/dist
+          key: wheel-${{ github.run_id }}
 
 
   upload:
@@ -109,8 +114,15 @@ jobs:
     needs: build
 
     steps:
-      - name: Upload final artifact
+      - name: Restore wheel from cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist/
+          key: wheel-${{ github.run_id }}
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: vnpy_ctp-manylinux2014-cp311
-          path: ${{ github.workspace }}/dist/*.whl
+          path: dist/*.whl
+          if-no-files-found: error
