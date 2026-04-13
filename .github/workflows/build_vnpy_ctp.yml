@@ -6,123 +6,167 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     container:
       image: quay.io/pypa/manylinux2014_x86_64
-
     env:
       PYTHON_ROOT: /opt/python/cp311-cp311
-      PATH: /opt/python/cp311-cp311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PATH: /opt/rh/devtoolset-10/root/usr/bin:/opt/python/cp311-cp311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       WHEELHOUSE: /wheelhouse
 
     steps:
-      # ------------------------------------------------------------
-      # 1️⃣ python3 / pip3 shim (CRITICAL)
-      # ------------------------------------------------------------
       - name: Create python3 & pip3 shims
         run: |
           ln -sf $PYTHON_ROOT/bin/python /usr/bin/python3
-          ln -sf $PYTHON_ROOT/bin/pip /usr/bin/pip3
+          ln -sf $PYTHON_ROOT/bin/pip    /usr/bin/pip3
 
       - name: Verify Python
-        run: |
-          python -V
-          python3 -V
-          pip -V
+        run: python -V && python3 -V && pip -V
 
-      # ------------------------------------------------------------
-      # 2️⃣ System tools (already available, just ensure basics)
-      # ------------------------------------------------------------
       - name: Install basic tools
-        run: |
-          yum install -y \
-            zip unzip binutils git cmake
+        run: yum install -y zip unzip binutils git cmake curl
 
-      # ------------------------------------------------------------
-      # 3️⃣ Enable GCC 10 (C++17 support, PREINSTALLED ✅)
-      # ------------------------------------------------------------
-      - name: Enable devtoolset-10 (C++17)
-        run: |
-          source /opt/rh/devtoolset-10/enable
-          gcc --version
-          g++ --version
+      - name: Verify devtoolset-10
+        run: gcc --version && g++ --version
 
-      # ------------------------------------------------------------
-      # 4️⃣ Python build tooling
-      # ------------------------------------------------------------
       - name: Upgrade Python build tools
-        run: |
-          source /opt/rh/devtoolset-10/enable
-          python -m pip install --upgrade \
-            pip setuptools wheel build auditwheel
+        run: python -m pip install --upgrade pip setuptools wheel build auditwheel
 
-      # ------------------------------------------------------------
-      # 5️⃣ Build wheel
-      # ------------------------------------------------------------
       - name: Build vnpy_ctp wheel
         run: |
-          source /opt/rh/devtoolset-10/enable
           mkdir -p $WHEELHOUSE
           pip wheel vnpy_ctp --no-deps -w $WHEELHOUSE
 
-      # ------------------------------------------------------------
-      # 6️⃣ Strip symbols (BIG size reduction)
-      # ------------------------------------------------------------
       - name: Strip native libraries
         run: |
           for whl in $WHEELHOUSE/*.whl; do
-              echo "Stripping $whl"
-              tmpdir=$(mktemp -d)
-              unzip -q "$whl" -d "$tmpdir"
-
-              find "$tmpdir" -name "*.so" -exec strip --strip-unneeded {} \; || true
-              find "$tmpdir" -name "*.a" -delete
-
-              new_whl="${whl%.whl}-stripped.whl"
-              (cd "$tmpdir" && zip -9 -qr "$new_whl" .)
-
-              rm -rf "$tmpdir"
-              rm "$whl"
-              mv "$new_whl" "$whl"
+            echo "Stripping $whl"
+            tmpdir=$(mktemp -d)
+            unzip -q "$whl" -d "$tmpdir"
+            find "$tmpdir" -name "*.so" -exec strip --strip-unneeded {} \; || true
+            find "$tmpdir" -name "*.a" -delete
+            new_whl="${whl%.whl}-stripped.whl"
+            (cd "$tmpdir" && zip -9 -qr "$new_whl" .)
+            rm -rf "$tmpdir" "$whl"
+            mv "$new_whl" "$whl"
           done
 
-
-      # ------------------------------------------------------------
-      # 7️⃣ manylinux compliance
-      # ------------------------------------------------------------
       - name: Auditwheel repair
+        run: auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
+
+      # ✅ Pure curl — no Node, no GLIBC requirements
+      # Uploads wheel to GitHub release tagged "wheel-cache-<run_id>"
+      - name: Create staging release and upload wheel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
+          TAG="wheel-cache-${RUN_ID}"
 
-      - name: Stage wheel into workspace
-        run: |
-          mkdir -p /github/workspace/dist
-          cp $WHEELHOUSE/repaired/*.whl /github/workspace/dist/
-          ls /github/workspace/dist/
+          # Create a draft release as a staging area
+          RELEASE=$(curl -sf -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${REPO}/releases" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"draft\":true,\"body\":\"Temporary staging release for run ${RUN_ID}\"}")
 
-      # ✅ actions/cache uses plain shell commands internally,
-      #    no Node GLIBC requirements at save time on this runner
-      - name: Save wheel to cache
-        uses: actions/cache/save@v4
-        with:
-          path: /github/workspace/dist
-          key: wheel-${{ github.run_id }}
+          UPLOAD_URL=$(echo "$RELEASE" | python3 -c \
+            "import sys,json; print(json.load(sys.stdin)['upload_url'].split('{')[0])")
+          RELEASE_ID=$(echo "$RELEASE" | python3 -c \
+            "import sys,json; print(json.load(sys.stdin)['id'])")
 
+          # Upload each wheel
+          for whl in $WHEELHOUSE/repaired/*.whl; do
+            fname=$(basename "$whl")
+            echo "Uploading $fname ..."
+            curl -sf -X POST \
+              -H "Authorization: token ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$whl" \
+              "${UPLOAD_URL}?name=${fname}"
+          done
+
+          # Save release ID so the next job can clean up
+          echo "$RELEASE_ID" > /github/workspace/release_id.txt
 
   upload:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # Modern GLIBC — Node 20 works fine here
     needs: build
 
     steps:
-      - name: Restore wheel from cache
-        uses: actions/cache/restore@v4
-        with:
-          path: dist/
-          key: wheel-${{ github.run_id }}
+      - name: Download wheel from staging release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          TAG="wheel-cache-${RUN_ID}"
+          mkdir -p dist
 
-      - name: Upload artifact
+          # Get the draft release by tag
+          RELEASE=$(curl -sf \
+            -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${REPO}/releases")
+
+          # Find our draft release and download its assets
+          RELEASE_ID=$(echo "$RELEASE" | python3 -c "
+          import sys, json
+          releases = json.load(sys.stdin)
+          for r in releases:
+              if r['tag_name'] == '${TAG}':
+                  print(r['id'])
+                  break
+          ")
+
+          ASSETS=$(curl -sf \
+            -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets")
+
+          echo "$ASSETS" | python3 -c "
+          import sys, json
+          assets = json.load(sys.stdin)
+          for a in assets:
+              print(a['id'], a['name'])
+          " | while read asset_id asset_name; do
+            echo "Downloading $asset_name ..."
+            curl -sfL \
+              -H "Authorization: token ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
+              -o "dist/${asset_name}"
+          done
+
+          ls dist/
+
+      - name: Upload final artifact
         uses: actions/upload-artifact@v4
         with:
           name: vnpy_ctp-manylinux2014-cp311
           path: dist/*.whl
           if-no-files-found: error
+
+      - name: Delete staging release
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          TAG="wheel-cache-${RUN_ID}"
+          RELEASE_ID=$(curl -sf \
+            -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${REPO}/releases" | python3 -c "
+          import sys, json
+          for r in json.load(sys.stdin):
+              if r['tag_name'] == '${TAG}':
+                  print(r['id']); break
+          ")
+          # Delete release
+          curl -sf -X DELETE \
+            -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}"
+          # Delete tag
+          curl -sf -X DELETE \
+            -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${REPO}/git/refs/tags/${TAG}"
+          echo "Staging release cleaned up."
