@@ -3,11 +3,16 @@ name: Build vnpy_ctp manylinux2014 wheel (cp311, optimized)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
       image: quay.io/pypa/manylinux2014_x86_64
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }
     env:
       PYTHON_ROOT: /opt/python/cp311-cp311
       PATH: /opt/rh/devtoolset-10/root/usr/bin:/opt/python/cp311-cp311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -53,120 +58,36 @@ jobs:
       - name: Auditwheel repair
         run: auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
 
-      # ✅ Pure curl — no Node, no GLIBC requirements
-      # Uploads wheel to GitHub release tagged "wheel-cache-<run_id>"
       - name: Create staging release and upload wheel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
+          set -euo pipefail
           TAG="wheel-cache-${RUN_ID}"
 
-          # Create a draft release as a staging area
-          RELEASE=$(curl -sf -X POST \
+          echo ">>> Creating draft release: $TAG"
+          RESPONSE=$(curl -f -X POST \
             -H "Authorization: token ${GH_TOKEN}" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${REPO}/releases" \
-            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"draft\":true,\"body\":\"Temporary staging release for run ${RUN_ID}\"}")
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"draft\":true,\"body\":\"Staging\"}")
 
-          UPLOAD_URL=$(echo "$RELEASE" | python3 -c \
+          echo ">>> Release created"
+
+          UPLOAD_URL=$(echo "$RESPONSE" | python3 -c \
             "import sys,json; print(json.load(sys.stdin)['upload_url'].split('{')[0])")
-          RELEASE_ID=$(echo "$RELEASE" | python3 -c \
-            "import sys,json; print(json.load(sys.stdin)['id'])")
 
-          # Upload each wheel
+          echo ">>> Upload URL: $UPLOAD_URL"
+
           for whl in $WHEELHOUSE/repaired/*.whl; do
             fname=$(basename "$whl")
-            echo "Uploading $fname ..."
-            curl -sf -X POST \
+            echo ">>> Uploading: $fname"
+            curl -f -X POST \
               -H "Authorization: token ${GH_TOKEN}" \
               -H "Content-Type: application/octet-stream" \
               --data-binary @"$whl" \
               "${UPLOAD_URL}?name=${fname}"
+            echo ">>> Done: $fname"
           done
-
-          # Save release ID so the next job can clean up
-          echo "$RELEASE_ID" > /github/workspace/release_id.txt
-
-  upload:
-    runs-on: ubuntu-latest   # Modern GLIBC — Node 20 works fine here
-    needs: build
-
-    steps:
-      - name: Download wheel from staging release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          TAG="wheel-cache-${RUN_ID}"
-          mkdir -p dist
-
-          # Get the draft release by tag
-          RELEASE=$(curl -sf \
-            -H "Authorization: token ${GH_TOKEN}" \
-            "https://api.github.com/repos/${REPO}/releases")
-
-          # Find our draft release and download its assets
-          RELEASE_ID=$(echo "$RELEASE" | python3 -c "
-          import sys, json
-          releases = json.load(sys.stdin)
-          for r in releases:
-              if r['tag_name'] == '${TAG}':
-                  print(r['id'])
-                  break
-          ")
-
-          ASSETS=$(curl -sf \
-            -H "Authorization: token ${GH_TOKEN}" \
-            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets")
-
-          echo "$ASSETS" | python3 -c "
-          import sys, json
-          assets = json.load(sys.stdin)
-          for a in assets:
-              print(a['id'], a['name'])
-          " | while read asset_id asset_name; do
-            echo "Downloading $asset_name ..."
-            curl -sfL \
-              -H "Authorization: token ${GH_TOKEN}" \
-              -H "Accept: application/octet-stream" \
-              "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
-              -o "dist/${asset_name}"
-          done
-
-          ls dist/
-
-      - name: Upload final artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vnpy_ctp-manylinux2014-cp311
-          path: dist/*.whl
-          if-no-files-found: error
-
-      - name: Delete staging release
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          TAG="wheel-cache-${RUN_ID}"
-          RELEASE_ID=$(curl -sf \
-            -H "Authorization: token ${GH_TOKEN}" \
-            "https://api.github.com/repos/${REPO}/releases" | python3 -c "
-          import sys, json
-          for r in json.load(sys.stdin):
-              if r['tag_name'] == '${TAG}':
-                  print(r['id']); break
-          ")
-          # Delete release
-          curl -sf -X DELETE \
-            -H "Authorization: token ${GH_TOKEN}" \
-            "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}"
-          # Delete tag
-          curl -sf -X DELETE \
-            -H "Authorization: token ${GH_TOKEN}" \
-            "https://api.github.com/repos/${REPO}/git/refs/tags/${TAG}"
-          echo "Staging release cleaned up."
