@@ -80,23 +80,9 @@ jobs:
             rm -rf tmp
           done
 
-      # ------------------------------------------------------------
-      # 7️⃣ manylinux compliance
-      # ------------------------------------------------------------
-      - name: Auditwheel repair
-        run: |
-          auditwheel repair $WHEELHOUSE/*.whl -w $WHEELHOUSE/repaired
-
-      # ------------------------------------------------------------
-      # 8️⃣ Output
-      # ------------------------------------------------------------
-      - name: Show final wheel
-        run: |
-          ls -lh $WHEELHOUSE/repaired
-
       - name: Copy wheel to workspace
         run: |
-          cp $WHEELHOUSE/repaired/*.whl $GITHUB_WORKSPACE/
+          cp $WHEELHOUSE/*.whl $GITHUB_WORKSPACE/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
