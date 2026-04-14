@@ -8,6 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: amazonlinux:2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Install build dependencies
@@ -33,11 +35,36 @@ jobs:
       - name: Build wheel
         run: python3.9 -m pip wheel quickfix --wheel-dir /output/
 
-      - name: Copy wheel to workspace
-        run: cp /output/*.whl $GITHUB_WORKSPACE/
+      - name: Create staging release and upload wheel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TAG="wheel-cache-${RUN_ID}"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: quickfix-al2-cp39
-          path: "*.whl"
+          echo ">>> Creating draft release: $TAG"
+          RESPONSE=$(curl -f -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${REPO}/releases" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"draft\":true,\"body\":\"Staging\"}")
+
+          echo ">>> Release created"
+
+          UPLOAD_URL=$(echo "$RESPONSE" | python3 -c \
+            "import sys,json; print(json.load(sys.stdin)['upload_url'].split('{')[0])")
+
+          echo ">>> Upload URL: $UPLOAD_URL"
+
+          for whl in /output/*.whl; do
+            fname=$(basename "$whl")
+            echo ">>> Uploading: $fname"
+            curl -f -X POST \
+              -H "Authorization: token ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$whl" \
+              "${UPLOAD_URL}?name=${fname}"
+            echo ">>> Done: $fname"
+          done
