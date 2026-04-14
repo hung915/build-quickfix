@@ -3,13 +3,14 @@ name: Build QuickFIX Wheels
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-al2:
     runs-on: ubuntu-latest
     container:
       image: amazonlinux:2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Install build dependencies
